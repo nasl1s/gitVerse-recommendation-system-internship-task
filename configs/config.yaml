@@ -1,0 +1,25 @@
+server:
+  user_service_address: ":8080"
+  product_service_address: ":8081"
+  recommendation_service_address: ":8082"
+  analytics_service_address: ":8083"
+  sso_service_address: ":8084"
+
+jwt:
+  secret: "9c8y59843yc59nct2092nyfr0uhc2fru8y0n238cfy0293rf" 
+  expiration: "24h"
+
+db:
+  host: "db"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  name: "postgres"
+  sslmode: "disable"
+
+kafka:
+  brokers:
+    - "kafka:9092"
+
+redis:
+  host: "redis:6379"

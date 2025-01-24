@@ -1,0 +1,286 @@
+version: "3.9"
+
+services:
+  postgres:
+    container_name: db
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: "db"
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: postgres
+      POSTGRES_SSLMODE: disable
+      SERVER_NAME: "0.0.0.0"
+    ports:
+      - "5432:5432"
+    networks:
+      - custom
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "-d", "postgres"]
+      interval: 30s
+      timeout: 60s
+      retries: 5
+      start_period: 80s
+
+  pgadmin:
+    container_name: pgadmin4_container
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: root@root.com
+      PGADMIN_DEFAULT_PASSWORD: root
+      SERVER_NAME: "0.0.0.0"
+    ports:
+      - "5050:80"
+    networks:
+      - custom
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      SERVER_NAME: "0.0.0.0"
+    ports:
+      - "2181:2181"
+    networks:
+      - custom
+
+  kafka:
+    container_name: kafka
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      SERVER_NAME: "0.0.0.0"
+    ports:
+      - "9092:9092"
+    networks:
+      - custom
+    healthcheck:
+      test: ["CMD", "nc", "-z", "kafka", "9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    container_name: elasticsearch
+    image: elasticsearch:7.16.1
+    volumes:
+      - ./configs/elasticsearch/config.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - ./docker_volumes/elasticsearch/data:/usr/share/elasticsearch/data
+    environment:
+      ES_JAVA_OPTS: "-Xmx512m -Xms512m"
+      ELASTIC_USERNAME: elastic
+      ELASTIC_PASSWORD: MyPw123
+      discovery.type: single-node
+      SERVER_NAME: "0.0.0.0"
+    networks:
+      - custom
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+
+  logstash:
+    container_name: logstash
+    image: logstash:7.16.2
+    volumes:
+      - ./configs/logstash/config.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./configs/logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
+      - ./configs/logstash/pipelines:/usr/share/logstash/config/pipelines:ro
+    environment:
+      LS_JAVA_OPTS: "-Xmx512m -Xms512m"
+      ELASTIC_USERNAME: elastic
+      ELASTIC_PASSWORD: MyPw123
+      SERVER_NAME: "0.0.0.0"
+    ports:
+      - "5044:5044"
+      - "5001:5000"
+      - "9600:9600"
+    networks:
+      - custom
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    container_name: kibana
+    image: kibana:7.16.1
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./configs/kibana/config.yml:/usr/share/kibana/config/kibana.yml:ro
+    networks:
+      - custom
+    ports:
+      - "5601:5601"
+
+  beats:
+    container_name: filebeat
+    image: elastic/filebeat:7.16.2
+    volumes:
+      - ./configs/filebeat/config.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logger/:/host_metrics_app/:ro
+    networks:
+      - custom
+    depends_on:
+      - elasticsearch
+
+  redis:
+    container_name: redis
+    image: "redis:6.2"
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    networks:
+      - custom
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    volumes:
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - custom
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - custom
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  user-service:
+    container_name: user-service
+    build:
+      context: .
+      dockerfile: cmd/user-service/Dockerfile
+    working_dir: /app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logger:/app/logger
+      - ./migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - custom
+
+  product-service:
+    container_name: product-service
+    build:
+      context: .
+      dockerfile: cmd/product-service/Dockerfile
+    working_dir: /app
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logger:/app/logger
+      - ./migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - custom
+
+  recommendation-service:
+    container_name: recommendation-service
+    build:
+      context: .
+      dockerfile: cmd/recommendation-service/Dockerfile
+    working_dir: /app
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logger:/app/logger
+      - ./migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - custom
+
+  analytics-service:
+    container_name: analytics-service
+    build:
+      context: .
+      dockerfile: cmd/analytics-service/Dockerfile
+    working_dir: /app
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logger:/app/logger
+      - ./migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - custom
+
+  sso-service:
+    container_name: sso-service
+    build:
+      context: .
+      dockerfile: cmd/sso-service/Dockerfile
+    working_dir: /app
+    ports:
+      - "8084:8084"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logger:/app/logger
+      - ./migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - custom
+
+networks:
+  custom:
+    driver: bridge
+
+volumes:
+  pgdata:
+  grafana_data:

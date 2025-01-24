@@ -63,116 +63,6 @@
 
 Сервис единой авторизации (SSO) предоставляет функционал регистрации пользователей и их аутентификации. При регистрации пользовательские данные сохраняются в базе данных, а при успешной аутентификации выдается JWT токен, который используется для авторизации в других микросервисах.
 
-```mermaid
-sequenceDiagram
-    participant UserService as User Service
-    participant ProductService as Product Service
-    participant RecommendationService as Recommendation Service
-    participant AnalyticsService as Analytics Service
-    participant SSOService as SSO Service
-    participant Kafka as Kafka
-    participant Redis as Redis (Cache)
-    participant Postgres as PostgreSQL (DB)
-    participant Prometheus as Prometheus
-    participant Grafana as Grafana
-    participant ELK as ELK (Logging)
-
-    SSOService->>UserService: Register User (API Call)
-    UserService->>Kafka: Publish Event: user_updates
-    UserService->>Postgres: Store User Data
-    Kafka->>RecommendationService: Consume Event: user_updates
-    RecommendationService->>Postgres: Fetch User Data
-    RecommendationService->>Redis: Cache Recommendations
-
-    Admin->>ProductService: Manage Products (API Call)
-    ProductService->>Kafka: Publish Event: product_updates
-    ProductService->>Postgres: Store Product Data
-    Kafka->>RecommendationService: Consume Event: product_updates
-    RecommendationService->>Postgres: Fetch Product Data
-    RecommendationService->>Redis: Update Cache
-
-    User->>RecommendationService: Get Recommendations (API Call)
-    RecommendationService->>Redis: Check Cache
-    alt Cache Hit
-        Redis-->>RecommendationService: Return Recommendations
-    else Cache Miss
-        RecommendationService->>Postgres: Query Recommendations
-        RecommendationService->>Redis: Cache Results
-        Postgres-->>RecommendationService: Return Recommendations
-    end
-    RecommendationService-->>User: Send Recommendations
-
-    Kafka->>AnalyticsService: Consume All Events
-    AnalyticsService->>Postgres: Store Analytics Data
-    AnalyticsService->>Redis: Cache Popularity Stats
-
-    User->>SSOService: Authenticate (Login)
-    SSOService->>Postgres: Validate Credentials
-    SSOService-->>User: Return Token
-
-    UserService-->>SSOService: Token Verification (API Call)
-
-    %% Monitoring and Logging
-    UserService->>Prometheus: Send Metrics
-    ProductService->>Prometheus: Send Metrics
-    RecommendationService->>Prometheus: Send Metrics
-    AnalyticsService->>Prometheus: Send Metrics
-    SSOService->>Prometheus: Send Metrics
-    Prometheus->>Grafana: Display Metrics Dashboard
-
-    UserService->>ELK: Send Logs
-    ProductService->>ELK: Send Logs
-    RecommendationService->>ELK: Send Logs
-    AnalyticsService->>ELK: Send Logs
-    SSOService->>ELK: Send Logs
-    ELK->>Admin: Display Logs in Kibana
-```
-
-```mermaid
-graph TD
-    %% User Service
-    User[User Service] --> Kafka[Kafka Broker]
-    User --> Postgres[PostgreSQL]
-    User --> Redis[Redis]
-    
-    %% Product Service
-    Product[Product Service] --> Kafka
-    Product --> Postgres
-    Product --> Redis
-    
-    %% Recommendation Service
-    Kafka -->|user_topic, product_topic| Recommendation[Recommendation Service]
-    Recommendation --> Redis
-    Recommendation --> Postgres
-    
-    %% Analytics Service
-    Kafka -->|All Topics| Analytics[Analytics Service]
-    Analytics --> Redis
-    Analytics --> Postgres
-    
-    %% SSO Service
-    SSO[SSO Service] --> Postgres
-    
-    %% Monitoring and Logging
-    User --> Prometheus[Prometheus]
-    Product --> Prometheus
-    Recommendation --> Prometheus
-    Analytics --> Prometheus
-    SSO --> Prometheus
-    
-    User --> ELK[ELK Stack]
-    Product --> ELK
-    Recommendation --> ELK
-    Analytics --> ELK
-    SSO --> ELK
-    
-    %% Additional Tools
-    Postgres -->|Database Management| PGAdmin[PGAdmin]
-    Prometheus --> Grafana[Grafana]
-    Redis -->|Cache Monitoring| Grafana
-
-```
-
 #### Схема связей таблиц базы данных:
 ##### Основные таблицы:
 USERS и PRODUCTS являются центральными таблицами.
@@ -187,95 +77,6 @@ USER_ANALYTICS и USER_CATEGORY_PREFERENCES содержат аналитику 
 ##### Уникальные связи:
 Каждая пара user_id и product_id уникальна в LIKES и DISLIKES.
 В USER_CATEGORY_PREFERENCES каждая категория пользователя уникальна.
-
-```mermaid
-erDiagram
-    USERS {
-        int id PK
-        string name
-        string email
-        string password_hash
-        timestamp created_at
-        timestamp updated_at
-    }
-    PRODUCTS {
-        int id PK
-        string name
-        text description
-        numeric price
-        string category
-        timestamp created_at
-        timestamp updated_at
-    }
-    RECOMMENDATIONS {
-        int id PK
-        int user_id FK
-        int[] product_ids
-        timestamp created_at
-    }
-    STATISTICS {
-        int id PK
-        int product_id FK
-        int views
-        int purchases
-        timestamp created_at
-        timestamp updated_at
-    }
-    PURCHASES {
-        int id PK
-        int user_id FK
-        int product_id FK
-        timestamp purchased_at
-    }
-    LIKES {
-        int id PK
-        int user_id FK
-        int product_id FK
-        timestamp liked_at
-    }
-    DISLIKES {
-        int id PK
-        int user_id FK
-        int product_id FK
-        timestamp disliked_at
-    }
-    USER_CATEGORY_PREFERENCES {
-        int id PK
-        int user_id FK
-        string category
-        numeric score
-    }
-    PRODUCT_ANALYTICS {
-        int id PK
-        int product_id FK
-        int likes
-        int dislikes
-        int purchases
-        timestamp updated_at
-    }
-    USER_ANALYTICS {
-        int id PK
-        int user_id FK
-        int total_likes
-        int total_dislikes
-        int total_purchases
-        timestamp updated_at
-    }
-
-    USERS ||--o{ RECOMMENDATIONS : has
-    USERS ||--o{ PURCHASES : makes
-    USERS ||--o{ LIKES : likes
-    USERS ||--o{ DISLIKES : dislikes
-    USERS ||--o{ USER_CATEGORY_PREFERENCES : has
-    USERS ||--o{ USER_ANALYTICS : analytics
-
-    PRODUCTS ||--o{ PURCHASES : bought_in
-    PRODUCTS ||--o{ LIKES : liked_in
-    PRODUCTS ||--o{ DISLIKES : disliked_in
-    PRODUCTS ||--o{ STATISTICS : tracked_in
-    PRODUCTS ||--o{ PRODUCT_ANALYTICS : analytics
-
-```
 
 #### Система кэширования
 ##### Принцип работы
@@ -524,7 +325,7 @@ INFO    -  [03:26:07] Browser connected: http://127.0.0.1:8000/
 ```
 
 Документация доступна по ссылке - http://127.0.0.1:8000/
-![mkdocs](docs/mkdocs.png)
+![mkdocs](mkdocs.png)
 
 ---
 ## Cервисы 
@@ -553,64 +354,63 @@ INFO    -  [03:26:07] Browser connected: http://127.0.0.1:8000/
 
 ### SSO сервис 
 http://127.0.0.1:8084/swagger/index.html
-![auth](docs/auth.png)
+![auth](auth.png)
 #### 1. Регистрация пользователя | Register user
-![register user](docs/register_user.png)
+![register user](register_user.png)
 
 #### 2. Аутентификация пользователя | User login
-![login user](docs/login_user.png)
-![login user response](docs/login_response.png)
+![login user](login_user.png)
+![login user response](login_response.png)
 
 ### Product сервис
 http://127.0.0.1:8081/swagger/index.html
-![product service endpoints](docs/products_endpoints.png)
+![product service endpoints](products_endpoints.png)
 #### 1. Создание продукта | Create product 
-![create product](docs/create_new_product.png)
+![create product](create_new_product.png)
 
 #### 2. Список всех продуктов
-![get all product](docs/get_all_products.png)
-![get all product response](docs/get_all_products_response.png)
+![get all product](get_all_products.png)
+![get all product response](get_all_products_response.png)
 
 ### User сервис
 http://127.0.0.1:8080/swagger/index.html
-![user-service](docs/user_service.png)
+![user-service](user_service.png)
 #### 1. Список всех пользователей
-![get all users](docs/get_all_users.png)
-![get all users response](docs/get_all_user_response.png)
+![get all users](get_all_users.png)
+![get all users response](get_all_user_response.png)
 #### 2. Like/Dislike 
 Реализована смена лайка и дизлайка
-![like](docs/like.png)
-![dislike](docs/dislike.png)
-![product info](docs/product_info.png)
+![like](like.png)
+![dislike](dislike.png)
+![product info](product_info.png)
 #### 3. Покупка товара
-![buy item](docs/purchase.png)
+![buy item](purchase.png)
 
 ### Recommendation сервис
 http://127.0.0.1:8082/swagger/index.html
 #### Рекомендация для пользователя
-![recommendations](docs/recommendations.png) 
+![recommendations](recommendations.png) 
 
 ### Analytic сервис
 http://127.0.0.1:8083/swagger/index.html
 #### 1. User analytics
-![user analytics](docs/user_analytics.png)
+![user analytics](user_analytics.png)
 
 #### 2. Product analytics
-![product analytics](docs/product_analytics.png)
+![product analytics](product_analytics.png)
 
 #### Database 
 http://127.0.0.1:5050
 ##### Users
-![db users](docs/db_users.png)
+![db users](db_users.png)
 
 ##### Products
-![db products](docs/db_products.png)
+![db products](db_products.png)
 
 #### ELK 
 http://127.0.0.1:5601
-![elk logs](docs/kibana_logs.png)
+![elk logs](kibana_logs.png)
 
 #### Grafana
-
 http://127.0.0.1:3000
-![grafana monitoring](docs/grafana.png)
+![grafana monitoring](grafana.png)

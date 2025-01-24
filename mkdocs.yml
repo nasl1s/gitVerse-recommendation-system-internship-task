@@ -1,0 +1,14 @@
+site_name: 'Документация для тестового задания GitVerse'
+theme:
+  name: 'material'
+plugins:
+  - search
+  - mermaid2
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+nav:
+  - 'Главная': index.md
+
